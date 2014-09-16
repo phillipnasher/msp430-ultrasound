@@ -35,11 +35,15 @@ void main(void) {
 
 void init_ports() {
 	//Echo
-	P1DIR |= ECHO_PIN | RED_LED; // Pin 1.2 output
-	P1SEL |= ECHO_PIN; // Route Timer_A to P1.2
-	//Trigger
-	P2DIR &= ~TRIGGER_PIN;// P2.1/TA1.1 Input Capture
-	P2SEL |= TRIGGER_PIN;
+	P1DIR |= ECHO_PIN | RED_LED;
+	P1OUT = 0;
+	P1SEL |= ECHO_PIN;
+
+	//Trigger, input
+	P2DIR &= ~TRIGGER_PIN;
+	P2IE |= TRIGGER_PIN;
+	P2IFG &= ~TRIGGER_PIN;
+	//P2SEL |= TRIGGER_PIN;
 }
 
 void init_trigger_pulse() {
@@ -53,7 +57,7 @@ void init_trigger_pulse() {
 void init_echo_pulse() {
 	//SMCLK, continuous mode
 	TA1CTL = TASSEL_2 | MC_2;
-	TA1CCTL1 = CAP + CM_3 + CCIE + SCS + CCIS_0;
+	//TA1CCTL1 = CAP + CM_3 + CCIE + SCS + CCIS_0;
 }
 
 #pragma vector = TIMER1_A1_VECTOR
@@ -73,4 +77,21 @@ __interrupt void echo_pulse_capture_isr(void) {
 		break;
 		default:break;
 	}
+}
+
+#pragma vector=PORT2_VECTOR
+__interrupt void Port_2(void)
+{
+	static unsigned short rising_edge;
+
+	if (P2IN & TRIGGER_PIN) { //High
+		rising_edge = TA1R;
+	} else { //Low
+		echo_pulse_diff = TA1R - rising_edge;
+//		TA1CCR1 = 0; //Reset for next sample
+		__bic_SR_register_on_exit(LPM0_bits + GIE);
+	}
+
+	P2IES ^= TRIGGER_PIN;
+	P2IFG &= ~TRIGGER_PIN;                        // P1.3 IFG cleared
 }
