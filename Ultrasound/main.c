@@ -1,12 +1,12 @@
 #include <msp430.h> 
 
 void init_ports();
-void init_trigger_pulse();
-void init_echo_pulse();
+void init_output_trigger_pulse();
+void init_input_echo_timer();
 
 #define RED_LED BIT0 //Red led on the texas launchpad
-#define TRIGGER_PIN BIT1 //Port 2
-#define ECHO_PIN BIT2 //Port 1
+#define ECHO_INPUT_PIN BIT1 //Port 2
+#define TRIGGER_PULSE_OUTPUT_PIN BIT2 //Port 1
 
 
 float echo_pulse_diff;
@@ -18,8 +18,8 @@ void main(void) {
     WDTCTL = WDTPW | WDTHOLD;	// Stop watchdog timer
 
     init_ports();
-    init_trigger_pulse();
-    init_echo_pulse();
+    init_output_trigger_pulse();
+    init_input_echo_timer();
 
     while (1) {
     	_BIS_SR(LPM0_bits + GIE); //Shut of CPU. Wake up on echo ISR
@@ -34,19 +34,17 @@ void main(void) {
 }
 
 void init_ports() {
-	//Echo
-	P1DIR |= ECHO_PIN | RED_LED;
-	P1OUT = 0;
-	P1SEL |= ECHO_PIN;
+	//Output trigger pulse
+	P1DIR |= TRIGGER_PULSE_OUTPUT_PIN | RED_LED;
+	P1SEL |= TRIGGER_PULSE_OUTPUT_PIN;
 
-	//Trigger, input
-	P2DIR &= ~TRIGGER_PIN;
-	P2IE |= TRIGGER_PIN;
-	P2IFG &= ~TRIGGER_PIN;
-	//P2SEL |= TRIGGER_PIN;
+	//Echo input
+	P2DIR &= ~ECHO_INPUT_PIN;
+	P2IE |= ECHO_INPUT_PIN;
+	P2IFG &= ~ECHO_INPUT_PIN;
 }
 
-void init_trigger_pulse() {
+void init_output_trigger_pulse() {
 	//ACLK, Up mode
 	TACTL = TASSEL_1 | MC_1;
 	TACCR0 = 100; //30.5ms pulse
@@ -54,12 +52,13 @@ void init_trigger_pulse() {
 	TACCR1 = 100;
 }
 
-void init_echo_pulse() {
+void init_input_echo_timer() {
 	//SMCLK, continuous mode
 	TA1CTL = TASSEL_2 | MC_2;
 	//TA1CCTL1 = CAP + CM_3 + CCIE + SCS + CCIS_0;
 }
 
+/*
 #pragma vector = TIMER1_A1_VECTOR
 __interrupt void echo_pulse_capture_isr(void) {
 	static unsigned short rising_edge;
@@ -78,20 +77,21 @@ __interrupt void echo_pulse_capture_isr(void) {
 		default:break;
 	}
 }
+*/
 
 #pragma vector=PORT2_VECTOR
 __interrupt void Port_2(void)
 {
 	static unsigned short rising_edge;
 
-	if (P2IN & TRIGGER_PIN) { //High
+	if (P2IN & ECHO_INPUT_PIN) { //High transition
 		rising_edge = TA1R;
-	} else { //Low
+	} else { //Low transition
 		echo_pulse_diff = TA1R - rising_edge;
-//		TA1CCR1 = 0; //Reset for next sample
 		__bic_SR_register_on_exit(LPM0_bits + GIE);
 	}
 
-	P2IES ^= TRIGGER_PIN;
-	P2IFG &= ~TRIGGER_PIN;                        // P1.3 IFG cleared
+	P2IES ^= ECHO_INPUT_PIN;
+	P2IFG &= ~ECHO_INPUT_PIN; //Clear the pin that generated the interrupt
+	TA1CCR1 = 0; //Reset for next capture
 }
