@@ -8,7 +8,6 @@ void init_input_echo_timer();
 #define ECHO_INPUT_PIN BIT1 //Port 2
 #define TRIGGER_PULSE_OUTPUT_PIN BIT2 //Port 1
 
-
 float echo_pulse_diff;
 /*
  * main.c
