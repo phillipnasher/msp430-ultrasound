@@ -1,96 +1,89 @@
-#include <msp430.h> 
+#include <msp430.h>
 
-void init_ports();
-void init_output_trigger_pulse();
-void init_input_echo_timer();
+#define SENSOR_TOP_TRIGGER_PIN BIT0
+#define SENSOR_DOWN_TRIGGER_PIN BIT1
+#define SENSOR_LEFT_TRIGGER_PIN BIT2
+#define SENSOR_RIGHT_TRIGGER_PIN BIT3
+#define NUM_SENSORS 4
 
-#define RED_LED BIT0 //Red led on the texas launchpad
-#define ECHO_INPUT_PIN BIT1 //Port 2
-#define TRIGGER_PULSE_OUTPUT_PIN BIT2 //Port 1
+//short sensor_triggers[NUM_SENSORS] = {SENSOR_TOP_TRIGGER_PIN,SENSOR_DOWN_TRIGGER_PIN};
 
-float echo_pulse_diff;
-/*
- * main.c
- */
+short sensor_triggers[NUM_SENSORS] = {SENSOR_TOP_TRIGGER_PIN,SENSOR_DOWN_TRIGGER_PIN,
+		SENSOR_LEFT_TRIGGER_PIN,SENSOR_RIGHT_TRIGGER_PIN};
+#define GREEN_LED BIT6
+short sensor_trigger_id = 0;
+float echo_pulse_diff = 0;
+float distance_cm = 0;
+float sensor_distance[NUM_SENSORS];
+unsigned int rising_edge;
+unsigned int falling_edge;
+
 void main(void) {
-	float distance_cm;
     WDTCTL = WDTPW | WDTHOLD;	// Stop watchdog timer
+    int i;
 
-    init_ports();
-    init_output_trigger_pulse();
-    init_input_echo_timer();
+    for (i = 0; i < NUM_SENSORS; i++) {
+    	P1DIR |= sensor_triggers[i];
+    	P2DIR &= ~sensor_triggers[i];
+		P2IE |= sensor_triggers[i];
+		P2IFG &= ~sensor_triggers[i];
+    }
+
+    P1DIR |= GREEN_LED;
+    P1OUT = 0;
+    P1OUT |= GREEN_LED;
+
+    TACTL = TASSEL_1 | MC_1;
+	TACCR0 = 20; //1.30ms pulse
+	TACCTL1 = OUTMOD_3 | CCIE; //Reset / Set (see page 364 of the user guide)
+	TA1CTL = TASSEL_2 | MC_2;
 
     while (1) {
-    	_BIS_SR(LPM0_bits + GIE); //Shut of CPU. Wake up on echo ISR
-    	distance_cm = echo_pulse_diff / 58;
+    	_BIS_SR(LPM0_bits + GIE);
+    	__no_operation();
+		echo_pulse_diff = falling_edge - rising_edge;
+		distance_cm = echo_pulse_diff / 58;
+		sensor_distance[sensor_trigger_id] = distance_cm;
 
-    	if (distance_cm <= 10) {
-    		P1OUT |= RED_LED;
-    	} else {
-    		P1OUT &= ~RED_LED;
-    	}
+		if (sensor_trigger_id == NUM_SENSORS) {
+			sensor_trigger_id = 0;
+		} else {
+
+			sensor_trigger_id++;
+		}
+
+    	//sensor_trigger_id = sensor_trigger_id++ == 2 ? 0 : sensor_trigger_id;
     }
 }
 
-void init_ports() {
-	//Output trigger pulse
-	P1DIR |= TRIGGER_PULSE_OUTPUT_PIN | RED_LED;
-	P1SEL |= TRIGGER_PULSE_OUTPUT_PIN;
 
-	//Echo input
-	P2DIR &= ~ECHO_INPUT_PIN;
-	P2IE |= ECHO_INPUT_PIN;
-	P2IFG &= ~ECHO_INPUT_PIN;
-}
-
-void init_output_trigger_pulse() {
-	//ACLK, Up mode
-	TACTL = TASSEL_1 | MC_1;
-	TACCR0 = 100; //30.5ms pulse
-	TACCTL1 = OUTMOD_3; //Reset / Set (see page 364 of the user guide)
-	TACCR1 = 100;
-}
-
-void init_input_echo_timer() {
-	//SMCLK, continuous mode
-	TA1CTL = TASSEL_2 | MC_2;
-	//TA1CCTL1 = CAP + CM_3 + CCIE + SCS + CCIS_0;
-}
-
-/*
-#pragma vector = TIMER1_A1_VECTOR
-__interrupt void echo_pulse_capture_isr(void) {
-	static unsigned short rising_edge;
-
-	switch(__even_in_range(TA1IV,0x01)) {
-		case TA1IV_NONE: break;              // Vector  0:  No interrupt
-		case TA1IV_TACCR1:
-			if ((TA1CCTL1 & CCI) == CCI) {
-				rising_edge = TA1CCR1;
-			} else { //Falling edge
-				echo_pulse_diff = TA1CCR1 - rising_edge;
-				TA1CCR1 = 0; //Reset for next sample
-				__bic_SR_register_on_exit(LPM0_bits + GIE);
-			}
-		break;
-		default:break;
+#pragma vector=TIMER0_A1_VECTOR
+__interrupt void trigger_pulse(void)
+{
+	switch (__even_in_range(TAIV,0x02)) {
+		case 0x02:
+			P1OUT ^= sensor_triggers[sensor_trigger_id];
+			//P1OUT ^= SENSOR_DOWN_TRIGGER_PIN;
+			TACCTL1 &= ~CCIFG;
+			//__bic_SR_register_on_exit(LPM0_bits + GIE);
+			break;
 	}
 }
-*/
 
 #pragma vector=PORT2_VECTOR
 __interrupt void Port_2(void)
 {
-	static unsigned short rising_edge;
+	unsigned short sensor = sensor_triggers[sensor_trigger_id];
 
-	if (P2IN & ECHO_INPUT_PIN) { //High transition
-		rising_edge = TA1R;
-	} else { //Low transition
-		echo_pulse_diff = TA1R - rising_edge;
-		__bic_SR_register_on_exit(LPM0_bits + GIE);
+	if (P2IFG & sensor) {
+		if (P2IN & sensor) { //High transition
+			rising_edge = TA1R;
+		} else {
+			falling_edge = TA1R;
+			//TA1R = 0;
+			__bic_SR_register_on_exit(LPM0_bits + GIE);
+		}
+		P2IES ^= sensor;
+		P2IFG &= ~sensor; //Clear the pin that generated the interrupt
 	}
-
-	P2IES ^= ECHO_INPUT_PIN;
-	P2IFG &= ~ECHO_INPUT_PIN; //Clear the pin that generated the interrupt
-	TA1CCR1 = 0; //Reset for next capture
 }
