@@ -63,16 +63,15 @@ float sensors_distances[NUM_SENSORS];
 unsigned int rising_edge = 0;
 unsigned int falling_edge = 0;
 
-short sensors_pinouts[NUM_SENSORS] = {SENSOR_TOP_PIN,SENSOR_BOTTOM_PIN,
-		SENSOR_LEFT_PIN,SENSOR_RIGHT_PIN};
+short sensors_pinouts[NUM_SENSORS] = {SENSOR_TOP_PIN, SENSOR_BOTTOM_PIN, SENSOR_LEFT_PIN, SENSOR_RIGHT_PIN};
 
 void init_ports();
 void init_timers();
 
+float sensor_echo_pulse_diff = 0;
+float sensor_distance_cm = 0;
 
 void main(void) {
-	float sensor_echo_pulse_diff = 0;
-	float sensor_distance_cm = 0;
 
 	init_timers();
 	init_ports();
@@ -82,9 +81,19 @@ void main(void) {
 		sensor_echo_pulse_diff = falling_edge - rising_edge;
 		sensor_distance_cm = sensor_echo_pulse_diff / 58;
 		sensors_distances[sensor_id] = sensor_distance_cm;
+
+		if (sensor_distance_cm <= 10) {
+			P1OUT |= BIT6;
+		} else {
+			P1OUT &= ~BIT6;
+		}
+
+		TACTL = TACLR;
+		TA1CTL = TACLR;
+		__delay_cycles(20000);
+		init_timers();
 		//Move to the next sensor
     	sensor_id = ++sensor_id == NUM_SENSORS ? 0 : sensor_id;
-    	__no_operation(); //For debugging
     }
 }
 
@@ -92,6 +101,9 @@ void main(void) {
 void init_ports()
 {
     int i;
+
+    P1DIR |= BIT6;
+
     //Setup port A for triggering pulses and port B for retrieving the replies from the sensors (via isr).
     for (i = 0; i < NUM_SENSORS; i++) {
     	P1DIR |= sensors_pinouts[i];
@@ -131,7 +143,7 @@ __interrupt void echo_reply_isr(void)
 	if (P2IFG & sensor) { //Has an interrupt occurred?
 		if (P2IN & sensor) { //High transition
 			rising_edge = TA1R;
-		} else {	//Low tranistion
+		} else {	//Low transistion
 			falling_edge = TA1R;
 			TA1R = 0;	//Clear to prevent overflow from messing up the next calculations
 			__bic_SR_register_on_exit(LPM0_bits + GIE); //Wake up CPU (resume main execution)
