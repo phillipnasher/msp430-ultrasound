@@ -56,15 +56,15 @@
 #define SENSOR_BOTTOM_PIN BIT1
 #define SENSOR_LEFT_PIN BIT2
 #define SENSOR_RIGHT_PIN BIT3
-#define NUM_SENSORS 4
+#define NUM_SENSORS 2
 
 short sensor_id = 0;
 float sensors_distances[NUM_SENSORS];
 unsigned int rising_edge = 0;
 unsigned int falling_edge = 0;
 
-short sensors_pinouts[NUM_SENSORS] = {SENSOR_TOP_PIN, SENSOR_BOTTOM_PIN, SENSOR_LEFT_PIN, SENSOR_RIGHT_PIN};
-
+short sensors_pinouts[NUM_SENSORS] = {SENSOR_TOP_PIN, SENSOR_BOTTOM_PIN};
+//short sensors_pinouts[NUM_SENSORS] = {SENSOR_TOP_PIN, SENSOR_BOTTOM_PIN, SENSOR_LEFT_PIN, SENSOR_RIGHT_PIN};
 void init_ports();
 void init_timers();
 
@@ -88,12 +88,19 @@ void main(void) {
 			P1OUT &= ~BIT6;
 		}
 
-		TACTL = TACLR;
-		TA1CTL = TACLR;
-		__delay_cycles(20000);
-		init_timers();
+		if (sensor_id == NUM_SENSORS - 1) {
+			__no_operation();
+		}
+
 		//Move to the next sensor
     	sensor_id = ++sensor_id == NUM_SENSORS ? 0 : sensor_id;
+
+    	//Restart timer
+    	TACTL = TACLR;
+    	TA1CTL = TACLR;
+    	//We need to wait for previous sensors to settle before moving to the next sensor
+    	__delay_cycles(100000);
+    	init_timers();
     }
 }
 
@@ -145,7 +152,6 @@ __interrupt void echo_reply_isr(void)
 			rising_edge = TA1R;
 		} else {	//Low transistion
 			falling_edge = TA1R;
-			TA1R = 0;	//Clear to prevent overflow from messing up the next calculations
 			__bic_SR_register_on_exit(LPM0_bits + GIE); //Wake up CPU (resume main execution)
 		}
 		P2IES ^= sensor;  //This enables the ISR to be called on both low and high transitions
